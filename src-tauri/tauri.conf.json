@@ -35,7 +35,7 @@
       "dmg",
       "nsis"
     ],
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "homepage": "https://github.com/yilujian/easy-writing",
     "icon": [
       "icons/32x32.png",
