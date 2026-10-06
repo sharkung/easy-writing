@@ -1,25 +1,27 @@
-name: Build Debian 13 DEB
+name: Build Debian
 
 on:
-  push:
-    branches:
-      - main
-      - master
   workflow_dispatch:
 
+  push:
+    tags:
+      - "v*"
+
 jobs:
-  build:
-    name: Build .deb on Debian 13
-    runs-on: ubuntu-24.04
+  build-debian:
+    name: Build Debian amd64
+    runs-on: ubuntu-latest
 
     container:
-      image: debian:13
+      image: debian:12
 
-    env:
-      CI: "true"
-      SKIP_INSTALL_SIMPLE_GIT_HOOKS: "1"
+    permissions:
+      contents: read
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Install system dependencies
         run: |
           apt-get update
@@ -29,83 +31,138 @@ jobs:
             curl \
             wget \
             git \
+            file \
             build-essential \
             pkg-config \
-            nodejs \
-            npm \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
+            libxdo-dev \
             libssl-dev \
-            libgtk-3-dev \
             libayatana-appindicator3-dev \
-            file
+            librsvg2-dev
 
-          node --version
-          npm --version
-          git --version
-
-          rm -rf /var/lib/apt/lists/*
-
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Prepare Git
+      - name: Install Node.js 22
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git -C "$GITHUB_WORKSPACE" rev-parse --is-inside-work-tree
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get install -y nodejs
 
       - name: Install pnpm
         run: |
-          npm install -g pnpm@10
-          pnpm --version
+          npm install -g pnpm
 
       - name: Install Rust
         run: |
           curl --proto '=https' \
             --tlsv1.2 \
             -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal
+            | sh -s -- -y
 
-          . "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      - name: Show toolchain
+        run: |
+          node --version
+          npm --version
+          pnpm --version
           rustc --version
           cargo --version
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         run: |
-          . "$HOME/.cargo/env"
           pnpm install --frozen-lockfile
 
       - name: Build Debian package
         run: |
-          . "$HOME/.cargo/env"
-
           pnpm tauri build --bundles deb
 
-      - name: Verify DEB
+      - name: List generated files
         run: |
-          echo "Generated Debian packages:"
+          find src-tauri/target/release/bundle/deb \
+            -maxdepth 1 \
+            -type f \
+            -print
 
-          find . -type f -name "*.deb" -print
+      - name: Verify Debian metadata
+        shell: bash
+        run: |
+          PACKAGE=$(find \
+            src-tauri/target/release/bundle/deb \
+            -maxdepth 1 \
+            -type f \
+            -name "*.deb" \
+            | head -n 1)
 
-          DEB_COUNT=$(find . -type f -name "*.deb" | wc -l)
-
-          if [ "$DEB_COUNT" -eq 0 ]; then
-            echo "ERROR: No .deb package was generated."
+          if [ -z "$PACKAGE" ]; then
+            echo "ERROR: No .deb package found"
             exit 1
           fi
 
-          echo "Found $DEB_COUNT Debian package(s)."
+          echo "Package: $PACKAGE"
+          echo
 
-          find . -type f -name "*.deb" -exec file {} \;
+          echo "===== Package ====="
+          dpkg-deb -f "$PACKAGE" Package
 
-      - name: Upload DEB artifact
-        uses: actions/upload-artifact@v5
+          echo "===== Version ====="
+          dpkg-deb -f "$PACKAGE" Version
+
+          echo "===== Architecture ====="
+          dpkg-deb -f "$PACKAGE" Architecture
+
+          echo "===== Depends ====="
+          dpkg-deb -f "$PACKAGE" Depends
+
+      - name: Validate package identity
+        shell: bash
+        run: |
+          PACKAGE=$(find \
+            src-tauri/target/release/bundle/deb \
+            -maxdepth 1 \
+            -type f \
+            -name "*.deb" \
+            | head -n 1)
+
+          NAME=$(dpkg-deb -f "$PACKAGE" Package)
+          VERSION=$(dpkg-deb -f "$PACKAGE" Version)
+          ARCH=$(dpkg-deb -f "$PACKAGE" Architecture)
+
+          test "$NAME" = "easy-writing"
+          test "$VERSION" = "1.1.0"
+          test "$ARCH" = "amd64"
+
+          echo "Debian package validation passed."
+
+      - name: Inspect desktop entry
+        shell: bash
+        run: |
+          PACKAGE=$(find \
+            src-tauri/target/release/bundle/deb \
+            -maxdepth 1 \
+            -type f \
+            -name "*.deb" \
+            | head -n 1)
+
+          echo "===== Package contents ====="
+
+          dpkg-deb -c "$PACKAGE"
+
+          DESKTOP_PATH=$(dpkg-deb -c "$PACKAGE" \
+            | awk '{print $6}' \
+            | grep '\.desktop$' \
+            | head -n 1)
+
+          echo
+          echo "Desktop file:"
+          echo "$DESKTOP_PATH"
+
+          echo
+          echo "===== Desktop entry ====="
+
+          dpkg-deb --fsys-tarfile "$PACKAGE" \
+            | tar -xOf - "./$DESKTOP_PATH"
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
         with:
-          name: easy-writing-debian-13
-          path: |
-            **/*.deb
+          name: easy-writing-debian-amd64
+          path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
-          retention-days: 30
