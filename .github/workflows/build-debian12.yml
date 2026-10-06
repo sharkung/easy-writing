@@ -1,14 +1,12 @@
 yaml
 name: Build Debian 12
 
-on:
+"on":
   push:
     branches:
       - main
-
     tags:
       - "v*"
-
   workflow_dispatch:
 
 permissions:
@@ -16,37 +14,23 @@ permissions:
 
 jobs:
   build-debian12:
-
     name: Debian 12 amd64
-
     runs-on: ubuntu-24.04
 
     container:
       image: debian:12
 
     steps:
-
-      # ==========================================
-      # Checkout
-      # ==========================================
-      - name: Checkout
-        uses: actions/checkout@v4
-
-
-      # ==========================================
-      # System dependencies
-      # ==========================================
-      - name: Install system dependencies
+      - name: Install basic tools
         shell: bash
         run: |
           set -eux
 
           apt-get update
 
-          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+          apt-get install -y \
             ca-certificates \
             curl \
-            wget \
             git \
             build-essential \
             pkg-config \
@@ -57,42 +41,31 @@ jobs:
             librsvg2-dev \
             patchelf \
             file \
-            xz-utils \
-            jq
+            xz-utils
 
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # ==========================================
-      # Node.js 22
-      # ==========================================
       - name: Install Node.js
         shell: bash
         run: |
           set -eux
 
           curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-
           apt-get install -y nodejs
 
           node --version
           npm --version
 
-
-      # ==========================================
-      # pnpm
-      # ==========================================
       - name: Install pnpm
         shell: bash
         run: |
           set -eux
 
-          npm install --global pnpm@10
+          npm install -g pnpm@10
 
           pnpm --version
 
-
-      # ==========================================
-      # Rust
-      # ==========================================
       - name: Install Rust
         shell: bash
         run: |
@@ -109,11 +82,7 @@ jobs:
           "$HOME/.cargo/bin/rustc" --version
           "$HOME/.cargo/bin/cargo" --version
 
-
-      # ==========================================
-      # Rust target
-      # ==========================================
-      - name: Install Rust Linux target
+      - name: Install Rust target
         shell: bash
         run: |
           set -eux
@@ -121,10 +90,6 @@ jobs:
           "$HOME/.cargo/bin/rustup" target add \
             x86_64-unknown-linux-gnu
 
-
-      # ==========================================
-      # Install frontend dependencies
-      # ==========================================
       - name: Install dependencies
         shell: bash
         run: |
@@ -132,10 +97,6 @@ jobs:
 
           pnpm install --frozen-lockfile
 
-
-      # ==========================================
-      # Build Debian package
-      # ==========================================
       - name: Build Debian package
         shell: bash
         run: |
@@ -145,23 +106,22 @@ jobs:
             --target x86_64-unknown-linux-gnu \
             --bundles deb
 
-
-      # ==========================================
-      # Inspect package
-      # ==========================================
-      - name: Inspect Debian package
+      - name: Find Debian package
         shell: bash
         run: |
           set -eux
 
-          echo "=========================================="
-          echo "Generated Debian packages"
-          echo "=========================================="
+          echo "===== Debian packages ====="
 
           find src-tauri/target \
             -type f \
             -name "*.deb" \
             -print
+
+      - name: Verify Debian package
+        shell: bash
+        run: |
+          set -eux
 
           PACKAGE=$(find src-tauri/target \
             -type f \
@@ -169,35 +129,19 @@ jobs:
             | head -n 1)
 
           if [ -z "$PACKAGE" ]; then
-            echo "ERROR: No Debian package found"
+            echo "ERROR: Debian package not found"
             exit 1
           fi
 
-          echo
-          echo "=========================================="
-          echo "Package"
-          echo "=========================================="
-
+          echo "===== Package ====="
           echo "$PACKAGE"
 
-          echo
-          echo "=========================================="
-          echo "dpkg-deb information"
-          echo "=========================================="
-
+          echo "===== Package information ====="
           dpkg-deb --info "$PACKAGE"
 
-          echo
-          echo "=========================================="
-          echo "Package contents"
-          echo "=========================================="
-
+          echo "===== Package contents ====="
           dpkg-deb --contents "$PACKAGE"
 
-
-      # ==========================================
-      # Upload GitHub Actions Artifact
-      # ==========================================
       - name: Upload Debian package
         uses: actions/upload-artifact@v4
         with:
@@ -205,10 +149,6 @@ jobs:
           path: src-tauri/target/**/*.deb
           if-no-files-found: error
 
-
-      # ==========================================
-      # GitHub Release
-      # ==========================================
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
