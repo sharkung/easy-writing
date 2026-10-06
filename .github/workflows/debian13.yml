@@ -48,10 +48,9 @@ jobs:
           node --version
           npm --version
 
-      - name: Enable pnpm
+      - name: install pnpm
         run: |
-          corepack enable
-          corepack prepare pnpm@9 --activate
+          npm install -g pnpm
           pnpm --version
 
       - name: Install Rust
