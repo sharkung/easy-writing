@@ -31,9 +31,7 @@
   "bundle": {
     "active": true,
     "targets": [
-      "app",
-      "dmg",
-      "nsis"
+      "deb"
     ],
     "createUpdaterArtifacts": false,
     "homepage": "https://github.com/yilujian/easy-writing",
