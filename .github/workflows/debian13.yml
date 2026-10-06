@@ -47,7 +47,7 @@ jobs:
 
       - name: Install pnpm
         run: |
-          npm install -g pnpm
+          npm install -g pnpm@10.32.0
 
       - name: Install Rust
         run: |
@@ -125,6 +125,10 @@ jobs:
           VERSION=$(dpkg-deb -f "$PACKAGE" Version)
           ARCH=$(dpkg-deb -f "$PACKAGE" Architecture)
 
+          echo "Package name: $NAME"
+          echo "Version:      $VERSION"
+          echo "Architecture: $ARCH"
+
           test "$NAME" = "easy-writing"
           test "$VERSION" = "1.1.0"
           test "$ARCH" = "amd64"
@@ -149,6 +153,11 @@ jobs:
             | awk '{print $6}' \
             | grep '\.desktop$' \
             | head -n 1)
+
+          if [ -z "$DESKTOP_PATH" ]; then
+            echo "ERROR: Desktop entry not found"
+            exit 1
+          fi
 
           echo
           echo "Desktop file:"
