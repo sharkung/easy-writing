@@ -9,87 +9,93 @@ name: Build Debian 12
       - "v*"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Debian 12 amd64
     runs-on: ubuntu-24.04
 
-    container:
-      image: debian:12
-
     steps:
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt-get install -y \
-            ca-certificates \
-            curl \
-            git \
-            build-essential \
-            pkg-config \
-            libssl-dev \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            file \
-            xz-utils
-
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Node.js
+      - name: Build inside Debian 12
         run: |
-          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-          apt-get install -y nodejs
+          docker run --rm \
+            --user root \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            debian:12 \
+            bash -euxo pipefail -c '
+              apt-get update
 
-      - name: Install pnpm
-        run: |
-          npm install -g pnpm@10
+              apt-get install -y \
+                ca-certificates \
+                curl \
+                git \
+                build-essential \
+                pkg-config \
+                libssl-dev \
+                libgtk-3-dev \
+                libwebkit2gtk-4.1-dev \
+                libayatana-appindicator3-dev \
+                librsvg2-dev \
+                patchelf \
+                file \
+                xz-utils \
+                dpkg-dev
 
-      - name: Install Rust
-        run: |
-          curl --proto '=https' \
-            --tlsv1.2 \
-            -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal
+              curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+              apt-get install -y nodejs
 
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+              npm install -g pnpm@10
 
-      - name: Install Rust target
-        run: |
-          "$HOME/.cargo/bin/rustup" target add x86_64-unknown-linux-gnu
+              curl \
+                --proto "=https" \
+                --tlsv1.2 \
+                -sSf https://sh.rustup.rs \
+                | sh -s -- -y --profile minimal
 
-      - name: Install project dependencies
-        run: |
-          pnpm install --frozen-lockfile
+              export PATH="$HOME/.cargo/bin:$PATH"
 
-      - name: Build Debian package
-        run: |
-          pnpm tauri build \
-            --target x86_64-unknown-linux-gnu \
-            --bundles deb
+              rustc --version
+              cargo --version
+              node --version
+              pnpm --version
 
-      - name: Find Debian package
-        run: |
-          find src-tauri/target \
-            -type f \
-            -name "*.deb" \
-            -print
+              rustup target add x86_64-unknown-linux-gnu
 
-      - name: Verify Debian package
-        run: |
-          PACKAGE=$(find src-tauri/target \
-            -type f \
-            -name "*.deb" \
-            | head -n 1)
+              pnpm install --frozen-lockfile
 
-          test -n "$PACKAGE"
+              pnpm tauri build \
+                --target x86_64-unknown-linux-gnu \
+                --bundles deb
 
-          echo "Package: $PACKAGE"
+              echo "===== Debian packages ====="
 
-          dpkg-deb --info "$PACKAGE"
+              find src-tauri/target \
+                -type f \
+                -name "*.deb" \
+                -print
+
+              PACKAGE=$(find src-tauri/target \
+                -type f \
+                -name "*.deb" \
+                | head -n 1)
+
+              test -n "$PACKAGE"
+
+              echo "===== Package ====="
+              echo "$PACKAGE"
+
+              echo "===== Package information ====="
+              dpkg-deb --info "$PACKAGE"
+
+              echo "===== Package contents ====="
+              dpkg-deb --contents "$PACKAGE"
+            '
 
       - name: Upload Debian package
         uses: actions/upload-artifact@v4
@@ -97,3 +103,10 @@ jobs:
           name: easy-writing-debian12-amd64
           path: src-tauri/target/**/*.deb
           if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/target/**/*.deb
+          generate_release_notes: true
