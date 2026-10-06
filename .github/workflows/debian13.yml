@@ -1,0 +1,100 @@
+name: Build Debian 13 DEB
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Debian 13 amd64 package
+    runs-on: ubuntu-24.04
+
+    container:
+      image: debian:13
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            git \
+            curl \
+            wget \
+            ca-certificates \
+            build-essential \
+            pkg-config \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf \
+            file
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        run: |
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get install -y nodejs
+          node --version
+          npm --version
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9 --activate
+          pnpm --version
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' \
+            --tlsv1.2 \
+            -sSf https://sh.rustup.rs \
+            | sh -s -- -y
+
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build Tauri application
+        shell: bash
+        run: |
+          source "$HOME/.cargo/env"
+
+          rustc --version
+          cargo --version
+
+          pnpm install --frozen-lockfile
+
+          pnpm tauri build --bundles deb
+
+      - name: Verify Debian package
+        run: |
+          echo "Generated packages:"
+          find . -type f -name "*.deb" -print
+
+          DEB=$(find . -type f -name "*.deb" | head -n 1)
+
+          if [ -z "$DEB" ]; then
+            echo "ERROR: No .deb package was generated."
+            exit 1
+          fi
+
+          echo "Package: $DEB"
+          file "$DEB"
+
+          dpkg-deb --info "$DEB"
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: easy-writing-debian13-amd64
+          path: "**/*.deb"
+          if-no-files-found: error
