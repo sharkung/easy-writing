@@ -5,8 +5,10 @@ on:
   push:
     branches:
       - main
+
     tags:
       - "v*"
+
   workflow_dispatch:
 
 permissions:
@@ -14,30 +16,35 @@ permissions:
 
 jobs:
   build-debian12:
-    name: Build .deb on Debian 12
+
+    name: Debian 12 amd64
+
     runs-on: ubuntu-24.04
 
     container:
       image: debian:12
 
     steps:
-      # ========================================
-      # 1. Checkout
-      # ========================================
+
+      # ==========================================
+      # Checkout
+      # ==========================================
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ========================================
-      # 2. Install system dependencies
-      # ========================================
-      - name: Install dependencies
+
+      # ==========================================
+      # System dependencies
+      # ==========================================
+      - name: Install system dependencies
         shell: bash
         run: |
           set -eux
 
           apt-get update
 
-          apt-get install -y \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            ca-certificates \
             curl \
             wget \
             git \
@@ -46,132 +53,166 @@ jobs:
             libssl-dev \
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
+            libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
             file \
-            jq \
-            ca-certificates \
             xz-utils \
-            sudo
+            jq
 
-      # ========================================
-      # 3. Install Node.js 22
-      # ========================================
+
+      # ==========================================
+      # Node.js 22
+      # ==========================================
       - name: Install Node.js
         shell: bash
         run: |
           set -eux
 
           curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+
           apt-get install -y nodejs
 
           node --version
           npm --version
 
-      # ========================================
-      # 4. Install pnpm
-      # ========================================
+
+      # ==========================================
+      # pnpm
+      # ==========================================
       - name: Install pnpm
         shell: bash
         run: |
           set -eux
 
-          npm install -g pnpm@10
+          npm install --global pnpm@10
 
           pnpm --version
 
-      # ========================================
-      # 5. Install Rust
-      # ========================================
+
+      # ==========================================
+      # Rust
+      # ==========================================
       - name: Install Rust
         shell: bash
         run: |
           set -eux
 
-          curl --proto '=https' \
+          curl \
+            --proto '=https' \
             --tlsv1.2 \
             -sSf https://sh.rustup.rs \
             | sh -s -- -y --profile minimal
 
-          . "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-          rustc --version
-          cargo --version
+          "$HOME/.cargo/bin/rustc" --version
+          "$HOME/.cargo/bin/cargo" --version
 
-      # ========================================
-      # 6. Add Rust Linux target
-      # ========================================
-      - name: Install Rust target
+
+      # ==========================================
+      # Rust target
+      # ==========================================
+      - name: Install Rust Linux target
         shell: bash
         run: |
           set -eux
 
-          . "$HOME/.cargo/env"
+          "$HOME/.cargo/bin/rustup" target add \
+            x86_64-unknown-linux-gnu
 
-          rustup target add x86_64-unknown-linux-gnu
 
-      # ========================================
-      # 7. Install frontend dependencies
-      # ========================================
-      - name: Install frontend dependencies
+      # ==========================================
+      # Install frontend dependencies
+      # ==========================================
+      - name: Install dependencies
         shell: bash
         run: |
           set -eux
 
           pnpm install --frozen-lockfile
 
-      # ========================================
-      # 8. Build Tauri Debian package
-      # ========================================
-      - name: Build Tauri
+
+      # ==========================================
+      # Build Debian package
+      # ==========================================
+      - name: Build Debian package
         shell: bash
         run: |
           set -eux
 
-          . "$HOME/.cargo/env"
+          pnpm tauri build \
+            --target x86_64-unknown-linux-gnu \
+            --bundles deb
 
-          pnpm tauri build --bundles deb
 
-      # ========================================
-      # 9. Find generated .deb
-      # ========================================
-      - name: Show generated packages
+      # ==========================================
+      # Inspect package
+      # ==========================================
+      - name: Inspect Debian package
         shell: bash
         run: |
           set -eux
 
-          echo "===== Debian packages ====="
+          echo "=========================================="
+          echo "Generated Debian packages"
+          echo "=========================================="
 
-          find src-tauri/target/release/bundle/deb \
+          find src-tauri/target \
             -type f \
             -name "*.deb" \
             -print
 
-          echo "===== Package information ====="
+          PACKAGE=$(find src-tauri/target \
+            -type f \
+            -name "*.deb" \
+            | head -n 1)
 
-          for pkg in src-tauri/target/release/bundle/deb/*.deb; do
-            echo "----- $pkg -----"
-            dpkg-deb -I "$pkg"
-          done
+          if [ -z "$PACKAGE" ]; then
+            echo "ERROR: No Debian package found"
+            exit 1
+          fi
 
-      # ========================================
-      # 10. Upload artifact
-      # ========================================
+          echo
+          echo "=========================================="
+          echo "Package"
+          echo "=========================================="
+
+          echo "$PACKAGE"
+
+          echo
+          echo "=========================================="
+          echo "dpkg-deb information"
+          echo "=========================================="
+
+          dpkg-deb --info "$PACKAGE"
+
+          echo
+          echo "=========================================="
+          echo "Package contents"
+          echo "=========================================="
+
+          dpkg-deb --contents "$PACKAGE"
+
+
+      # ==========================================
+      # Upload GitHub Actions Artifact
+      # ==========================================
       - name: Upload Debian package
         uses: actions/upload-artifact@v4
         with:
           name: easy-writing-debian12-amd64
-          path: src-tauri/target/release/bundle/deb/*.deb
+          path: src-tauri/target/**/*.deb
           if-no-files-found: error
 
-      # ========================================
-      # 11. Upload to GitHub Release
-      # ========================================
-      - name: Release
+
+      # ==========================================
+      # GitHub Release
+      # ==========================================
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/target/release/bundle/deb/*.deb
+          files: src-tauri/target/**/*.deb
           generate_release_notes: true
 ```
