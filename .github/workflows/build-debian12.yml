@@ -9,25 +9,18 @@ name: Build Debian 12
       - "v*"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  build-debian12:
-    name: Debian 12 amd64
+  build:
+    name: Build Debian 12 amd64
     runs-on: ubuntu-24.04
 
     container:
       image: debian:12
 
     steps:
-      - name: Install basic tools
-        shell: bash
+      - name: Install dependencies
         run: |
-          set -eux
-
           apt-get update
-
           apt-get install -y \
             ca-certificates \
             curl \
@@ -47,100 +40,56 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Node.js
-        shell: bash
         run: |
-          set -eux
-
           curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
           apt-get install -y nodejs
 
-          node --version
-          npm --version
-
       - name: Install pnpm
-        shell: bash
         run: |
-          set -eux
-
           npm install -g pnpm@10
 
-          pnpm --version
-
       - name: Install Rust
-        shell: bash
         run: |
-          set -eux
-
-          curl \
-            --proto '=https' \
+          curl --proto '=https' \
             --tlsv1.2 \
             -sSf https://sh.rustup.rs \
             | sh -s -- -y --profile minimal
 
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-          "$HOME/.cargo/bin/rustc" --version
-          "$HOME/.cargo/bin/cargo" --version
-
       - name: Install Rust target
-        shell: bash
         run: |
-          set -eux
+          "$HOME/.cargo/bin/rustup" target add x86_64-unknown-linux-gnu
 
-          "$HOME/.cargo/bin/rustup" target add \
-            x86_64-unknown-linux-gnu
-
-      - name: Install dependencies
-        shell: bash
+      - name: Install project dependencies
         run: |
-          set -eux
-
           pnpm install --frozen-lockfile
 
       - name: Build Debian package
-        shell: bash
         run: |
-          set -eux
-
           pnpm tauri build \
             --target x86_64-unknown-linux-gnu \
             --bundles deb
 
       - name: Find Debian package
-        shell: bash
         run: |
-          set -eux
-
-          echo "===== Debian packages ====="
-
           find src-tauri/target \
             -type f \
             -name "*.deb" \
             -print
 
       - name: Verify Debian package
-        shell: bash
         run: |
-          set -eux
-
           PACKAGE=$(find src-tauri/target \
             -type f \
             -name "*.deb" \
             | head -n 1)
 
-          if [ -z "$PACKAGE" ]; then
-            echo "ERROR: Debian package not found"
-            exit 1
-          fi
+          test -n "$PACKAGE"
 
-          echo "===== Package ====="
-          echo "$PACKAGE"
+          echo "Package: $PACKAGE"
 
-          echo "===== Package information ====="
           dpkg-deb --info "$PACKAGE"
-
-          echo "===== Package contents ====="
-          dpkg-deb --contents "$PACKAGE"
 
       - name: Upload Debian package
         uses: actions/upload-artifact@v4
@@ -148,10 +97,3 @@ jobs:
           name: easy-writing-debian12-amd64
           path: src-tauri/target/**/*.deb
           if-no-files-found: error
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: src-tauri/target/**/*.deb
-          generate_release_notes: true
